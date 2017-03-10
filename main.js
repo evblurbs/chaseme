@@ -26,6 +26,8 @@ class App extends React.Component {
     super(props);
     this.state = {
       courier: false,
+      recipientLocation: null,
+      courierLocation: null,
       recipient: false,
       recLat: null,
       recLong: null,
@@ -33,12 +35,17 @@ class App extends React.Component {
       couLong: null,
       delivered: false,
     };
+    this.map = null;
   }
   componentDidMount() {
     database.ref('recipient').on('value', (snapshot) => {
       let res = snapshot.val();
       if(res && res.lat && res.long) {
         this.setState({
+          recipientLocation: {
+            latitude: res.lat,
+            longitude: res.long,
+          },
           recLat: res.lat,
           recLong: res.long,
         });
@@ -48,8 +55,20 @@ class App extends React.Component {
       let res = snapshot.val();
       if(res && res.lat && res.long) {
         this.setState({
+          courierLocation: {
+            latitude: res.lat,
+            longitude: res.long,
+          },
           couLat: res.lat,
           couLong: res.long,
+        });
+      }
+    });
+    database.ref('delivered').on('value', (snapshot) => {
+      let res = snapshot.val();
+      if(res) {
+        this.setState({
+          delivered: res,
         });
       }
     });
@@ -66,6 +85,19 @@ class App extends React.Component {
         lat: obj.coords.latitude,
         long: obj.coords.longitude,
       });
+    }
+    // If we can check the two locations to see if
+    // they are near each other, we can highlight step 3.
+    // otherwise, don't worry about it. Not sure if we need
+    // to look into google maps api to get distance between
+    // two coordinates, or check the map zoom level?
+  }
+  componentDidUpdate() {
+    this.focusMap();
+  }
+  focusMap() {
+    if(this.map && this.state.recipientLocation && this.state.courierLocation) {
+      this.map.fitToSuppliedMarkers(["recipient", "courier"], true);
     }
   }
   async getLocation() {
@@ -95,6 +127,10 @@ class App extends React.Component {
   handleReset() {
     database.ref('courier').remove();
     database.ref('recipient').remove();
+    database.ref('delivered').set(false);
+  }
+  handleDelivered() {
+    database.ref('delivered').set(true);
   }
   renderDefault() {
     return (
@@ -129,25 +165,34 @@ class App extends React.Component {
     );
   }
   renderMap() {
+    const recipient = (this.state.recLat && this.state.recLong) ?
+      <Components.MapView.Marker
+        coordinate={this.state.recipientLocation}
+        identifier="recipient"
+        title={'User'}
+        description={'You are here!'}
+      /> : null;
+    const courier = (this.state.couLat && this.state.couLong) ?
+      <Components.MapView.Marker
+        coordinate={this.state.courierLocation}
+        identifier="courier"
+        title={'User'}
+        description={'You are here!'}
+      /> : null;
     if(this.state.recLat && this.state.recLong) {
       return (
         <Components.MapView
-          style={styles.map}
           initialRegion={{
             latitude: this.state.recLat,
             longitude: this.state.recLong,
             latitudeDelta: 0.0922,
             longitudeDelta: 0.0421,
           }}
+          style={styles.map}
+          ref={ref => { this.map = ref; }}
         >
-          <Components.MapView.Marker
-            coordinate={{
-              latitude: this.state.recLat,
-              longitude: this.state.recLong,
-            }}
-            title={'User'}
-            description={'You are here!'}
-          />
+          {recipient}
+          {courier}
         </Components.MapView>
       );
     }
@@ -160,9 +205,9 @@ class App extends React.Component {
         </View>
         <Text style={styles.activeStep}>1. Your order is being prepared. We will be there in a flash!</Text>
         <Text style={(this.state.delivered || (this.state.recLat && this.state.couLat)) ? styles.activeStep : styles.inactiveStep}>2. Your courrier is on the way. Hold tight!</Text>
-        <Text style={styles.inactiveStep}>3. Your courrier is nearby. Go grab your stuff!</Text>
+        <Text style={(this.state.delivered) ? styles.activeStep : styles.inactiveStep}>3. Your courrier is nearby. Go grab your stuff!</Text>
         {this.renderMap()}
-        <Text style={styles.inactiveStep}>4. Your order was delivered! Thanks!</Text>
+        <Text style={(this.state.delivered) ? styles.activeStep : styles.inactiveStep}>4. Your order was delivered! Thanks!</Text>
       </View>
     )
   }
@@ -174,6 +219,14 @@ class App extends React.Component {
         </View>
         <Text style={styles.activeStep}>1. Deliver to the person below!</Text>
         {this.renderMap()}
+        <View style={styles.deliveryButton}>
+          <Button
+            onPress={() => this.handleDelivered()}
+            title="Confirm Delivery"
+            color="#757575"
+            accessibilityLabel="Delivery is done."
+          />
+        </View>
       </View>
     )
   }
@@ -244,6 +297,11 @@ const styles = StyleSheet.create({
     margin: 20,
     height: 200,
   },
+  deliveryButton: {
+    flex: 1,
+    margin: 20,
+    height: 20,
+  }
 });
 
 
